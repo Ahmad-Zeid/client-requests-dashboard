@@ -1,21 +1,35 @@
 # Client Requests
 
-An internal dashboard for tracking incoming client work: what came in, who it is for,
-and where it stands. React + TypeScript on the front, Express + Postgres behind it.
+A triage cockpit for incoming client work: what came in, whose it is, where it stands,
+and — the part that matters for an agency — what has gone quiet. React + TypeScript on
+the front, Express + Postgres behind it, with changes pushed live over SSE.
 
 Keyboard-first, dark by default, with a light theme that follows your OS until you
 choose otherwise.
 
-![The requests dashboard](docs/dashboard.png)
+![The triage cockpit](docs/cockpit-dark.png)
+
+Three panes rather than a table. The rail is where you choose *what to look at* — by
+status, by client, or by what the server has flagged as neglected. The queue is a dense
+list you walk with `j`/`k`. The detail pane updates as you move, with no modal and no
+round trip, so reading through fourteen requests is fourteen keystrokes.
 
 <table>
 <tr>
+<td width="50%"><img src="docs/trail-dark.png" alt="A request's activity trail" /></td>
 <td width="50%"><img src="docs/palette.png" alt="Command palette" /></td>
-<td width="50%"><img src="docs/drawer.png" alt="Request detail drawer" /></td>
 </tr>
 <tr>
-<td><code>⌘K</code> — commands, filters, and every loaded request</td>
-<td>The full record, including the version the conflict check compares</td>
+<td>Every status change, who made it, and the version it produced</td>
+<td><code>⌘K</code> — fuzzy-matched commands, clients, and every loaded request</td>
+</tr>
+<tr>
+<td><img src="docs/request-log.png" alt="Live request log" /></td>
+<td><img src="docs/cockpit-light.png" alt="Light theme" /></td>
+</tr>
+<tr>
+<td><code>G</code> — every API call this tab has made, with timings and request ids</td>
+<td>The same interface in light</td>
 </tr>
 </table>
 
@@ -69,7 +83,11 @@ npm run dev
 | `ops@example.com` | `demo1234` |
 
 The API runs on `:4000`; Vite proxies `/api` to it, so there is no CORS setup and no
-base URL to configure.
+base URL to configure. Open a second window side by side and advance something in one —
+the other updates without a refresh.
+
+To see the concurrency handling without arranging a race yourself, press `⌘K` and look
+under **Demonstrate**.
 
 ### Scripts
 
@@ -90,6 +108,51 @@ derived from `DATABASE_URL` automatically.
 
 Built and tested on Node 26; anything from Node 20 up will work.
 
+### Deploying it
+
+Three free tiers, in this order — each step needs a URL from the one before it.
+
+**1. Postgres — [Neon](https://neon.tech).** Create a project and copy the pooled
+connection string. Seed it once from your machine — Render's pre-deploy step below
+handles migrations from then on:
+
+```bash
+DATABASE_URL='<neon connection string>' npm run db:migrate
+DATABASE_URL='<neon connection string>' npm run db:seed
+```
+
+**2. API — [Render](https://render.com).** New Web Service from the repo.
+
+| Setting | Value |
+| --- | --- |
+| Build command | `npm install && npm run build --workspace server` |
+| Pre-deploy command | `npm run migrate --workspace server` |
+| Start command | `npm start --workspace server` |
+| Health check path | `/api/v1/health` |
+
+Migrations run as a pre-deploy step rather than on boot. On one instance the difference
+is invisible; on two it is the difference between one migration and a race between
+replicas, and the runner is idempotent either way.
+
+Environment: `DATABASE_URL` (Neon), `AUTH_SECRET` (a long random string — not the
+example one), `NODE_ENV=production`, `DEMO_MODE=true`, and `CORS_ORIGIN` set to the
+Vercel URL from step 3. Leave `CORS_ORIGIN` blank on the first deploy and fill it in
+once you have that URL.
+
+**3. Client — [Vercel](https://vercel.com).** Import the repo, root directory `client`,
+framework Vite. One environment variable:
+
+```
+VITE_API_BASE_URL=https://<your-render-service>.onrender.com/api/v1
+```
+
+Then set `CORS_ORIGIN` on Render to the Vercel URL and redeploy it.
+
+Render's free tier sleeps after fifteen minutes of inactivity, so the first request
+after a quiet spell takes about thirty seconds. `DEMO_MODE=true` puts *Reset the demo
+data* in the palette, so a visitor who marks everything done cannot spoil it for the
+next one.
+
 ---
 
 ## The interface
@@ -98,18 +161,28 @@ Everything is reachable without a mouse. `?` opens the full sheet in-app.
 
 | Key | Action |
 | --- | --- |
-| `⌘K` / `Ctrl K` | Command palette — actions, filters, and jump-to-request |
+| `⌘K` / `Ctrl K` | Command palette — toggles, so the same key closes it |
+| `J` `K` | Move through the queue; the detail pane follows |
+| `H` `L` | Move focus between panes |
+| `E` | Advance the selected request |
 | `/` | Search |
 | `C` | New request |
-| `J` `K` | Move the selection |
-| `↵` | Open the selected request |
-| `E` | Advance the selected request |
 | `1`–`4` | Filter by status |
+| `5` | Only what needs attention |
+| `G` | Show the live request log |
+| `Esc` | Widen: clear the search, then the filters |
 | `?` | Shortcut sheet |
+
+Vertical for items, horizontal for panes. That is the vim spatial model, and it is worth
+having only because there *are* panes to move between — it is the reason the layout and
+the keyboard scheme were designed together rather than one bolted onto the other.
 
 The palette follows the Linear / Raycast pattern: it opens instantly with no entrance
 animation, the input keeps focus throughout, and the *highlight* moves between rows
 while the rows themselves stay put — an animated list is disorienting to arrow through.
+Matching is subsequence-based and scored, so "sim conf" finds "Simulate a stale
+conflict", and every command shows its shortcut — the palette is also how people learn
+the keys and stop needing the palette.
 
 Single-key shortcuts yield to whatever you are typing into. Without that guard, typing
 "check" into the search box would fire `C`, `E` and `K` on the way past; it is the
@@ -128,18 +201,23 @@ paint — otherwise every load flashes the wrong theme, which is the most obviou
 │       ├── config/env.ts          zod-validated environment, checked at boot
 │       ├── db/                    pool · migration runner · migrations · seed
 │       ├── middleware/            requestId · requireAuth · errorHandler
-│       ├── lib/                   ApiError · logger
+│       ├── lib/                   ApiError · logger · eventBus
 │       └── modules/
 │           ├── auth/              mock login, real signed tokens
+│           ├── events/            SSE stream · single-use stream tickets
+│           ├── demo/              env-gated reset, so a public demo survives visitors
 │           └── requests/          routes → controller → service → repository
+│                                  + attention rules, shared by JS and SQL
 └── client/
     └── src/
         ├── styles/                design tokens + one stylesheet
         ├── lib/apiClient.ts       the only place fetch is called
-        ├── components/            Button · Field · Badge · Toast · StateBlock
+        ├── components/            Button · Field · Badge · Toast · RequestLog
         └── features/
             ├── auth/              context · sign-in · route guard
-            └── requests/          page · table · status control · dialog · hooks
+            ├── command/           palette + subsequence scoring
+            ├── events/            useEventStream — SSE into the query cache
+            └── requests/          page · list · detail · dialog · hooks
 ```
 
 The backend is four layers, and each one only knows about the one below it:
@@ -157,16 +235,25 @@ database noise around it, and the SQL is reviewable without reading past busines
 
 ```
 click
-  └─ RequestsPage.handleAdvance()          reads the row's current version
+  └─ RequestsPage.advance()                reads the row's current version
       └─ useAdvanceStatus.mutate()
           ├─ onMutate                      cancel refetches, snapshot cache,
           │                                write the new status → UI updates now
           ├─ PATCH /api/v1/requests/:id/status
           │     └─ requireAuth             401 if the token is missing or expired
-          │     └─ controller              zod-parses body and params
-          │     └─ service                 is new → in_progress legal?  422 if not
-          │     └─ repository              UPDATE … WHERE id = $1 AND version = $2
-          │                                0 rows matched → someone else won → 409
+          │     └─ controller              zod-parses body and params; takes the
+          │                                actor from the session, not the body
+          │     └─ service                 stale version?           → 409
+          │                                is new → in_progress legal?  422 if not
+          │     └─ repository              one statement:
+          │                                  UPDATE … WHERE id = $1 AND version = $2
+          │                                  + INSERT the event, reading from it
+          │                                0 rows matched → someone else won → 409,
+          │                                and no history is written
+          │     └─ service                 publish `request.updated` — after commit,
+          │                                never before
+          │                                   └─ SSE → every other connected tab,
+          │                                      which patches that one row in place
           ├─ onError                       roll back; on 409 write the live row the
           │                                server sent and explain in a toast
           └─ onSettled                     invalidate, refetch, cache matches server
@@ -179,17 +266,21 @@ click
 Base path `/api/v1`. Everything except `/health` and `/auth/login` needs
 `Authorization: Bearer <token>`.
 
-| Method  | Path                    | Purpose                                    |
-| ------- | ----------------------- | ------------------------------------------ |
-| `GET`   | `/health`               | Liveness, including a real database ping   |
-| `POST`  | `/auth/login`           | Exchange credentials for a session token   |
-| `GET`   | `/auth/me`              | Who the current token belongs to           |
-| `GET`   | `/requests`             | Paginated list; filter, search, sort       |
-| `GET`   | `/requests/stats`       | Counts per status, for the sidebar         |
-| `POST`  | `/requests`             | Create — always starts at `new`            |
-| `PATCH` | `/requests/:id/status`  | Advance the status                         |
+| Method  | Path                     | Purpose                                          |
+| ------- | ------------------------ | ------------------------------------------------ |
+| `GET`   | `/health`                | Liveness, including a real database ping         |
+| `POST`  | `/auth/login`            | Exchange credentials for a session token         |
+| `GET`   | `/auth/me`               | Who the current token belongs to                 |
+| `GET`   | `/requests`              | Paginated list; filter, search, sort             |
+| `GET`   | `/requests/stats`        | Counts per status and per client, for the rail   |
+| `GET`   | `/requests/:id/activity` | That request's trail, oldest first               |
+| `POST`  | `/requests`              | Create — always starts at `new`                  |
+| `PATCH` | `/requests/:id/status`   | Advance the status                               |
+| `POST`  | `/events/ticket`         | Exchange the session token for a stream ticket   |
+| `GET`   | `/events?ticket=…`       | Server-Sent Events: `request.created`/`.updated` |
+| `POST`  | `/demo/reset`            | Reseed. Only mounted when `DEMO_MODE=true`.      |
 
-**List** — `?status=new|in_progress|done&q=<text>&page=1&pageSize=20&sort=createdAt:desc`
+**List** — `?status=new|in_progress|done&attention=true&client=<name>&q=<text>&page=1&pageSize=20`
 
 ```jsonc
 {
@@ -203,7 +294,15 @@ Base path `/api/v1`. Everything except `/health` and `/auth/login` needs
       "status": "new",
       "version": 1,
       "createdAt": "2026-07-27T09:14:02.331Z",
-      "updatedAt": "2026-07-27T09:14:02.331Z"
+      "updatedAt": "2026-07-27T09:14:02.331Z",
+
+      // Derived on every read, never stored — it is a function of the clock, so a
+      // stored copy would be wrong the moment nobody wrote to the row.
+      "attention": {
+        "reason": "unacknowledged_high",
+        "label": "High priority, unacknowledged for 30 hours",
+        "hours": 30
+      }
     }
   ],
   "pagination": { "page": 1, "pageSize": 20, "total": 14, "totalPages": 1 }
@@ -268,6 +367,60 @@ and one person's action vanishes with no error anywhere. The check and the write
 single statement, so there is no read-then-write gap to race through — and it costs no
 locks.
 
+**The product has an opinion, and it lives on the server.** Every request in a flat
+queue is equal, which is exactly the failure mode of an agency queue — the thing that
+hurts is not volume, it is a request nobody has answered. Three rules in
+`requests.attention.ts` say what neglect looks like: a high-priority request
+unacknowledged for a day, anything waiting three days, work started and untouched for
+five. The thresholds are named constants used twice — once by the JavaScript that
+decorates each row, once by the SQL fragment that powers `?attention=true` and the
+count. One source, two consumers, so the filter and the badge can never disagree.
+
+It surfaces as a sentence — "4 requests have gone quiet" — rather than a stat card.
+Everyone ships stat cards and nobody reads them.
+
+**An append-only trail, written in the same statement as the change.** `client_requests`
+holds the current state; `request_events` holds how it got there — who, when, from what
+to what, and which version the write produced. The insert is a data-modifying CTE
+attached to the `UPDATE`, so there is no window where a status change exists without its
+history, and a compare-and-set that *loses* writes no history at all. The actor comes
+from the verified session, never the request body: an actor a client can name is an
+actor a client can forge, and a trail that records whatever it is told is worse than no
+trail because it looks authoritative.
+
+**Live updates over SSE, not WebSockets.** The traffic is entirely one-directional — the
+server says what changed, and there is already a perfectly good REST API for writing. A
+WebSocket would add a second protocol with its own framing, heartbeats and reconnect
+logic to buy a direction that is never used. On `request.updated` the client patches the
+matching row in every cached list *surgically* instead of invalidating; on
+`request.created` it invalidates, because a new row moves ordering and page boundaries.
+
+**Stream tickets, because `EventSource` cannot send a header.** The usual workaround is
+`?token=<session token>`, which writes an eight-hour credential into every access log,
+proxy cache and browser history entry along the way. Instead `POST /events/ticket`
+exchanges the bearer token for a **single-use, thirty-second** ticket, and the stream
+opens with that. A leaked ticket is worth nothing: it has already been spent. About
+twenty-five lines, and it is the difference between a demo and something you could
+deploy.
+
+**Timestamps are normalised in the driver.** Postgres writes
+`2026-07-23 21:19:37.119764+03` — a space instead of `T`, and an offset with no minutes.
+`Date` is not required to parse that: V8 does, which is why it looks fine in Chrome and
+in Node, and Safari returns `Invalid Date`. One `toISOString()` in the type parser fixes
+it once for every timestamp in the system, rather than in each place that happens to
+render one. A bug that appears on one engine, in a field nobody thinks of as parsed, is
+exactly the kind that reaches production.
+
+**The strongest engineering here is invisible, so there is a way to see it.** A
+*Demonstrate* group in the palette fires a genuine second-session write. "Simulate a
+colleague" lets the update arrive over the stream and watch the row change in front of
+you. "Simulate a stale conflict" makes the same write but withholds the live update for
+that one row, so this client is *genuinely* stale and the next advance produces a real
+409 from a real version mismatch. Nothing about the server is faked; the only trick is
+withholding a refresh, which is precisely the state a backgrounded tab is in. `G` opens
+a log of every call the tab has made, with status, duration and the request id that
+matches the server's logs.
+
 **Optimistic updates, with an honest rollback.** The row changes the instant you click
 rather than after the round trip. If the server disagrees, the cache rolls back to the
 snapshot taken before the mutation, and a 409 additionally writes in the live row the
@@ -326,8 +479,13 @@ Front end:
 - Forms validate on blur and then live, so nobody is told their email is wrong while
   typing the first character. Helper text reserves its line so errors do not push the
   page down.
-- Below 768px the table becomes cards — still a real `<table>` in the markup, with each
-  cell labelled, rather than a data grid you have to scroll sideways.
+- The layout degrades in two steps, not one: below 1100px the detail pane becomes an
+  overlay over the queue; below 860px the rail folds into a top bar. Both paths reuse the
+  same components, so there is no second implementation to keep in sync.
+- The selection is validated against the list rather than merely set. Switching filters
+  keeps the previous page on screen while the next loads, so a naive "select the first
+  row" grabs one from the list that is about to be replaced — and lands on an id nothing
+  matches, leaving an empty pane beside a full queue with no state change left to fix it.
 - Keyboard-complete: skip link, visible focus rings everywhere, native `<dialog>` for
   the focus trap and Escape handling. Dialogs move focus to the first field, not the
   close button — otherwise a keyboard user's opening move is "cancel".
@@ -351,6 +509,9 @@ Back end:
   unauthenticated write.
 - Migrations tracked in `schema_migrations`, each applied inside a transaction with its
   own bookkeeping row.
+- The SSE endpoint sends a comment heartbeat every 25 seconds, so an idle connection is
+  not silently reaped by a proxy, and shutdown closes open streams first — without that
+  the process ignores `SIGTERM` and waits for a timeout that never comes.
 - Parameterised queries throughout.
 - Internal errors are logged with their stack and returned as an opaque 500.
 
@@ -362,14 +523,21 @@ Back end:
 npm test
 ```
 
-Ten integration tests through the real HTTP stack and a real Postgres, covering the
-parts most worth protecting:
+Twenty-one integration tests through the real HTTP stack and a real Postgres, covering
+the parts most worth protecting:
 
 ```
 auth boundary          401 without a token · 401 on a tampered token
 validation             400 with the offending field named
 status state machine   new → in_progress → done · rejects skipping · rejects reopening
 optimistic concurrency 409 on a stale version, with the live row attached
+activity trail         one entry per write · actor from the session · nothing on a
+                       lost compare-and-set · 404 for a request that does not exist
+attention rules        each reason fires on known-age rows; the SQL count and the
+                       JavaScript predicate agree
+client scoping         list narrows to one client · stats count open work per client
+stream tickets         401 unauthenticated · opens a stream once · rejected on reuse
+                       and when forged
 listing                pagination envelope · status filter
 health                 reports database connectivity
 ```
@@ -377,20 +545,27 @@ health                 reports database connectivity
 They are deliberately not mocked. The version compare-and-set, the enum constraint, and
 the pagination envelope are exactly the things a mock would paper over.
 
+The UI has its own suite, driven through Playwright against the running stack: fifty-one
+behavioural checks (optimistic update with the response held open, the conflict path,
+the keyboard model, live sync between two real browser contexts, ticket reuse) plus a
+contrast and responsive pass that measures every text pair and control boundary against
+WCAG in **both** themes at five widths.
+
 ---
 
 ## What I would add next
 
 Named deliberately — these are choices, not omissions:
 
-- **An audit trail.** `request_status_events` recording who moved what and when, written
-  in the same transaction as the status change. The current model knows the state but
-  not the history.
 - **Real authentication.** Users table, hashed passwords, short-lived access tokens with
-  refresh, and per-user attribution on requests.
-- **Push instead of poll.** Refetch-on-focus covers most of the staleness, but a
-  WebSocket or SSE channel would let one person's change appear on everyone's screen
-  immediately — and would make the 409 path rare rather than routine.
+  refresh. The trail already records an actor per write, so it would gain real identities
+  rather than a new column.
+- **The event bus should not be in-process.** `eventBus.ts` broadcasts to the responses
+  held by *this* process. Run two instances behind a load balancer and a change made on
+  one is invisible to everyone connected to the other. Redis pub/sub between the writer
+  and the streams is the fix, and it is the first thing that breaks on a second replica.
+- **Assignment.** Requests belong to a client but not yet to a person, so "gone quiet"
+  cannot become "gone quiet on *you*" — which is the version of that signal people act on.
 - **Keyset pagination.** `OFFSET` degrades on deep pages; seeking on `(created_at, id)`
   stays flat. Not worth it at this size, worth it before the table gets large.
 - **Error reporting and tracing.** Sentry on both sides, and OpenTelemetry spans so a
