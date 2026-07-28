@@ -58,8 +58,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div className="toast-region" role="status" aria-live="assertive" aria-atomic="false">
         {toasts.map((toast) => (
           <div key={toast.id} className="toast" data-tone={toast.tone}>
-            <span aria-hidden="true" style={{ marginTop: 1 }}>
-              <Icon name="alert" size={16} />
+            <span className="toast__icon" aria-hidden="true">
+              <Icon name="alert" size={15} />
             </span>
             <div className="toast__body">
               <p className="toast__title">{toast.title}</p>
