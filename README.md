@@ -3,7 +3,21 @@
 An internal dashboard for tracking incoming client work: what came in, who it is for,
 and where it stands. React + TypeScript on the front, Express + Postgres behind it.
 
+Keyboard-first, dark by default, with a light theme that follows your OS until you
+choose otherwise.
+
 ![The requests dashboard](docs/dashboard.png)
+
+<table>
+<tr>
+<td width="50%"><img src="docs/palette.png" alt="Command palette" /></td>
+<td width="50%"><img src="docs/drawer.png" alt="Request detail drawer" /></td>
+</tr>
+<tr>
+<td><code>⌘K</code> — commands, filters, and every loaded request</td>
+<td>The full record, including the version the conflict check compares</td>
+</tr>
+</table>
 
 ---
 
@@ -15,7 +29,8 @@ looking at the app in about two minutes.
 ### With Docker (nothing to install)
 
 ```bash
-git clone <this-repo> && cd client-requests
+git clone https://github.com/Ahmad-Zeid/client-requests-dashboard.git
+cd client-requests-dashboard
 docker compose up -d          # Postgres on :5433
 npm install
 cp server/.env.example server/.env
@@ -76,6 +91,34 @@ derived from `DATABASE_URL` automatically.
 Built and tested on Node 26; anything from Node 20 up will work.
 
 ---
+
+## The interface
+
+Everything is reachable without a mouse. `?` opens the full sheet in-app.
+
+| Key | Action |
+| --- | --- |
+| `⌘K` / `Ctrl K` | Command palette — actions, filters, and jump-to-request |
+| `/` | Search |
+| `C` | New request |
+| `J` `K` | Move the selection |
+| `↵` | Open the selected request |
+| `E` | Advance the selected request |
+| `1`–`4` | Filter by status |
+| `?` | Shortcut sheet |
+
+The palette follows the Linear / Raycast pattern: it opens instantly with no entrance
+animation, the input keeps focus throughout, and the *highlight* moves between rows
+while the rows themselves stay put — an animated list is disorienting to arrow through.
+
+Single-key shortcuts yield to whatever you are typing into. Without that guard, typing
+"check" into the search box would fire `C`, `E` and `K` on the way past; it is the
+difference between a keyboard system and a keyboard bug.
+
+Theme is dark by default, follows `prefers-color-scheme` on first visit, and stores your
+choice once you make one. A tiny inline script in `index.html` applies it before first
+paint — otherwise every load flashes the wrong theme, which is the most obvious
+"unfinished" tell a themed app can have.
 
 ## How it is put together
 
@@ -252,11 +295,21 @@ on every `/requests` route, and a tampered token gets a 401. Swapping in real
 authentication touches `auth.tokens.ts` and the login controller; nothing downstream
 knows the difference.
 
-**Cobalt on near-white, one accent.** Space Grotesk for display, Inter for body,
-JetBrains Mono for timestamps. Statuses do not get a traffic-light palette — `new` is
-neutral, `in_progress` carries the single accent, `done` recedes. Hierarchy carries the
-meaning, so the one saturated colour on screen always means "this is the active thing".
-Every colour and font resolves through a token in `styles/tokens.css`.
+**One accent, and the status glyph carries the meaning.** `new` is a hollow ring,
+`in_progress` is half-filled, `done` is solid — legible in greyscale and to anyone who
+cannot separate the hues, so colour is never the only signal. Priority gets a quiet dot
+rather than a second badge column; two identical pill columns side by side flatten the
+hierarchy instead of building it.
+
+**Tokens are named for their role, not their value.** `--surface-overlay` means "the
+highest layer" in both themes, even though that is a lighter colour in dark and a whiter
+one in light. Numbered tokens (`paper-1`, `paper-2`…) invert their meaning between themes
+and quietly rot. Two accent tokens exist for the same reason: one colour cannot both
+carry white text as a button fill and stay legible as text on a dark canvas.
+
+**Control borders are a separate token from decorative ones.** WCAG 1.4.11 wants 3:1 on
+anything needed to *identify a control*; a row divider is decoration and is exempt. One
+token for both would either make the dividers shout or leave the inputs unfindable.
 
 ---
 
@@ -276,8 +329,13 @@ Front end:
 - Below 768px the table becomes cards — still a real `<table>` in the markup, with each
   cell labelled, rather than a data grid you have to scroll sideways.
 - Keyboard-complete: skip link, visible focus rings everywhere, native `<dialog>` for
-  the focus trap and Escape handling.
-- `prefers-reduced-motion` collapses animation.
+  the focus trap and Escape handling. Dialogs move focus to the first field, not the
+  close button — otherwise a keyboard user's opening move is "cancel".
+- Three animation primitives, total: the palette highlight, the drawer slide, and a
+  one-shot flash on the row whose status just landed. `prefers-reduced-motion` collapses
+  all of them. No `transition-all`, no hover-scale, no overshoot easings.
+- Contrast is measured, not eyeballed: every text pair and control boundary is checked
+  against WCAG in **both** themes as part of the verification pass.
 - Search is debounced, which also removes the out-of-order-response bug where the answer
   to `chec` lands after the answer to `checkout`.
 
