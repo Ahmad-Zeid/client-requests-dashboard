@@ -1,8 +1,11 @@
 import { pool } from '../../db/pool.js';
+import { ATTENTION_SQL } from './requests.attention.js';
 import type {
   ClientRequest,
+  ClientSummary,
   CreateRequestInput,
   ListRequestsQuery,
+  RequestEvent,
   RequestStatus,
 } from './requests.schema.js';
 
@@ -29,7 +32,7 @@ type Row = {
   updated_at: string;
 };
 
-function toClientRequest(row: Row): ClientRequest {
+function toClientRequest(row: Row): Omit<ClientRequest, 'attention'> {
   return {
     id: row.id,
     clientName: row.client_name,
@@ -47,7 +50,7 @@ const COLUMNS = `
   id, client_name, title, description, priority, status, version, created_at, updated_at
 `;
 
-export async function findById(id: string): Promise<ClientRequest | null> {
+export async function findById(id: string): Promise<Omit<ClientRequest, 'attention'> | null> {
   const { rows } = await pool.query<Row>(
     `select ${COLUMNS} from client_requests where id = $1`,
     [id],
@@ -57,8 +60,8 @@ export async function findById(id: string): Promise<ClientRequest | null> {
 
 export async function list(
   query: ListRequestsQuery,
-): Promise<{ items: ClientRequest[]; total: number }> {
-  const { status, q, page, pageSize, sort } = query;
+): Promise<{ items: Array<Omit<ClientRequest, 'attention'>>; total: number }> {
+  const { status, attention, q, page, pageSize, sort } = query;
 
   // Build the WHERE clause from whichever filters were supplied. Placeholders are
   // numbered as they're appended so the values array always lines up.
@@ -68,6 +71,16 @@ export async function list(
   if (status) {
     values.push(status);
     conditions.push(`status = $${values.length}`);
+  }
+
+  if (attention) {
+    // No placeholder: the fragment is built from named constants, never from input.
+    conditions.push(ATTENTION_SQL);
+  }
+
+  if (query.client) {
+    values.push(query.client);
+    conditions.push(`client_name = $${values.length}`);
   }
 
   if (q) {
@@ -114,12 +127,95 @@ export async function countsByStatus(): Promise<Record<RequestStatus, number>> {
   return counts;
 }
 
-export async function create(input: CreateRequestInput): Promise<ClientRequest> {
+/**
+ * How many requests the attention rules flag, across the whole table — which is why
+ * this is SQL and not a filter over the current page.
+ */
+export async function countNeedingAttention(): Promise<number> {
+  const { rows } = await pool.query<{ count: string }>(
+    `select count(*)::text as count from client_requests where ${ATTENTION_SQL}`,
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+/**
+ * Who has open work, and how much. One grouped scan; `filter` keeps it to a single
+ * pass rather than a self-join or two queries reconciled in JavaScript.
+ *
+ * Ordered by open work first, because a client with nothing outstanding is not
+ * something anyone needs at the top of a queue navigator.
+ */
+export async function countsByClient(limit: number): Promise<ClientSummary[]> {
+  const { rows } = await pool.query<{ name: string; open: string; total: string }>(
+    `select client_name as name,
+            count(*) filter (where status <> 'done')::text as open,
+            count(*)::text                                 as total
+       from client_requests
+      group by client_name
+      order by count(*) filter (where status <> 'done') desc, client_name asc
+      limit $1`,
+    [limit],
+  );
+
+  return rows.map((row) => ({
+    name: row.name,
+    open: Number(row.open),
+    total: Number(row.total),
+  }));
+}
+
+/** One request's trail, oldest first — a timeline reads forwards. */
+export async function listEvents(requestId: string): Promise<RequestEvent[]> {
+  const { rows } = await pool.query<{
+    id: string;
+    type: RequestEvent['type'];
+    from_status: RequestStatus | null;
+    to_status: RequestStatus;
+    actor: string;
+    version: number;
+    created_at: string;
+  }>(
+    `select id::text, type, from_status, to_status, actor, version, created_at
+       from request_events
+      where request_id = $1
+      order by id asc`,
+    [requestId],
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    fromStatus: row.from_status,
+    toStatus: row.to_status,
+    actor: row.actor,
+    version: row.version,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
+ * Insert the row and its first event in one statement.
+ *
+ * A single statement is atomic without opening an explicit transaction, so there is
+ * no window in which a request exists with no history — and no pooled client held
+ * across two round trips. The data-modifying CTE is the reason this works: `created`
+ * runs once, and both the event insert and the final select read from that one result.
+ */
+export async function create(
+  input: CreateRequestInput,
+  actor: string,
+): Promise<Omit<ClientRequest, 'attention'>> {
   const { rows } = await pool.query<Row>(
-    `insert into client_requests (client_name, title, description, priority)
-     values ($1, $2, $3, $4)
-     returning ${COLUMNS}`,
-    [input.clientName, input.title, input.description || null, input.priority],
+    `with created as (
+       insert into client_requests (client_name, title, description, priority)
+       values ($1, $2, $3, $4)
+       returning ${COLUMNS}
+     ), logged as (
+       insert into request_events (request_id, type, from_status, to_status, actor, version)
+       select id, 'created', null, status, $5, version from created
+     )
+     select ${COLUMNS} from created`,
+    [input.clientName, input.title, input.description || null, input.priority, actor],
   );
 
   // `returning` guarantees exactly one row on a successful insert.
@@ -139,17 +235,27 @@ export async function updateStatusIfVersionMatches(
   id: string,
   status: RequestStatus,
   expectedVersion: number,
-): Promise<ClientRequest | null> {
+  actor: string,
+  fromStatus: RequestStatus,
+): Promise<Omit<ClientRequest, 'attention'> | null> {
   const { rows } = await pool.query<Row>(
-    `update client_requests
-        set status = $1,
-            version = version + 1,
-            updated_at = now()
-      where id = $2
-        and version = $3
-      returning ${COLUMNS}`,
-    [status, id, expectedVersion],
+    `with updated as (
+       update client_requests
+          set status = $1,
+              version = version + 1,
+              updated_at = now()
+        where id = $2
+          and version = $3
+        returning ${COLUMNS}
+     ), logged as (
+       insert into request_events (request_id, type, from_status, to_status, actor, version)
+       select id, 'status_changed', $5, status, $4, version from updated
+     )
+     select ${COLUMNS} from updated`,
+    [status, id, expectedVersion, actor, fromStatus],
   );
 
+  // Zero rows means the compare-and-set lost — and because the event insert reads
+  // from `updated`, no history is written for a write that did not happen.
   return rows[0] ? toClientRequest(rows[0]) : null;
 }

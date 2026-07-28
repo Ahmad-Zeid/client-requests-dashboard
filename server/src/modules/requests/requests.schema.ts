@@ -6,6 +6,17 @@ export const REQUEST_PRIORITIES = ['low', 'medium', 'high'] as const;
 export type RequestStatus = (typeof REQUEST_STATUSES)[number];
 export type RequestPriority = (typeof REQUEST_PRIORITIES)[number];
 
+/**
+ * Why a request is being flagged. Derived, never stored — it is a function of the
+ * clock, so persisting it would mean a row could be stale the moment nobody wrote to it.
+ */
+export type RequestAttention = {
+  reason: 'unacknowledged_high' | 'waiting_too_long' | 'stalled';
+  label: string;
+  /** Hours since the timestamp the rule cares about. */
+  hours: number;
+};
+
 /** The row as the API returns it. camelCase at the boundary, snake_case in the database. */
 export type ClientRequest = {
   id: string;
@@ -17,6 +28,28 @@ export type ClientRequest = {
   version: number;
   createdAt: string;
   updatedAt: string;
+  attention: RequestAttention | null;
+};
+
+/**
+ * One entry in a request's trail. Stored, unlike `attention` — this is a record of
+ * something that happened, so it must survive the clock moving on.
+ */
+export type RequestEvent = {
+  id: string;
+  type: 'created' | 'status_changed';
+  fromStatus: RequestStatus | null;
+  toStatus: RequestStatus;
+  actor: string;
+  version: number;
+  createdAt: string;
+};
+
+/** A client, with how much of its work is still open. Powers the rail's client list. */
+export type ClientSummary = {
+  name: string;
+  open: number;
+  total: number;
 };
 
 export const createRequestSchema = z.object({
@@ -42,6 +75,13 @@ export type UpdateStatusInput = z.infer<typeof updateStatusSchema>;
 
 export const listRequestsQuerySchema = z.object({
   status: z.enum(REQUEST_STATUSES).optional(),
+  /** Narrow to requests the attention rules have flagged. */
+  attention: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => value === 'true'),
+  /** Exact client name — the rail's client list navigates by this. */
+  client: z.string().trim().max(120).optional(),
   q: z.string().trim().max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   // Capped: the page size is caller-supplied, so it needs a ceiling or a client

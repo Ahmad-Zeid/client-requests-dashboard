@@ -5,11 +5,24 @@ import { logger } from '../lib/logger.js';
 
 /**
  * `timestamptz` columns arrive as JS Date objects by default, which then get
- * serialised inconsistently depending on where JSON.stringify runs. Parsing them
- * as raw ISO-8601 strings keeps one representation from Postgres all the way to
- * the browser — the API contract says "ISO string", so that is what the driver hands back.
+ * serialised inconsistently depending on where JSON.stringify runs. The API contract
+ * says "ISO 8601 string", so the driver is what makes that true — once, here, rather
+ * than in every function that happens to touch a timestamp.
+ *
+ * Handing the raw column value through would be cheaper but wrong. Postgres writes
+ * `2026-07-23 21:19:37.119764+03` — a space instead of `T`, and a two-digit offset
+ * with no minutes. That is not a format `Date` is required to parse: V8 accepts it,
+ * which is why it looks fine in Chrome and in Node, and Safari returns `Invalid Date`.
+ * A bug that only appears on one engine, in a field nobody thinks of as parsed, is
+ * exactly the kind that survives to production.
+ *
+ * `toISOString()` normalises to UTC with a `Z` suffix, which every engine parses. The
+ * cost is microsecond precision, truncated to milliseconds — timestamps here are read
+ * by people, not used for ordering, and `id` is the tiebreaker where ordering matters.
  */
-pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (value: string) => value);
+pg.types.setTypeParser(pg.types.builtins.TIMESTAMPTZ, (value: string) =>
+  new Date(value).toISOString(),
+);
 
 export const pool = new pg.Pool({
   connectionString: env.DATABASE_URL,

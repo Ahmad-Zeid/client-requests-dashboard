@@ -16,6 +16,13 @@ requestsRouter.get('/stats', controller.getStats);
 requestsRouter.post('/', controller.createRequest);
 
 /**
+ * The trail as a sub-resource, not a field on the request. It is a separate thing
+ * with a separate lifetime — the request is mutable and small, its history is
+ * append-only and unbounded — so it gets its own URL and can be cached differently.
+ */
+requestsRouter.get('/:id/activity', controller.getActivity);
+
+/**
  * PATCH, not PUT: this replaces one field, not the whole resource. And a dedicated
  * `/status` sub-resource rather than a general-purpose PATCH on the request itself,
  * because a status change is a distinct operation with its own rules — it runs

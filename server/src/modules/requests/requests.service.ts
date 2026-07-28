@@ -1,9 +1,13 @@
 import { ApiError } from '../../lib/ApiError.js';
+import { publish } from '../../lib/eventBus.js';
+import { attentionFor } from './requests.attention.js';
 import * as repository from './requests.repository.js';
 import type {
   ClientRequest,
+  ClientSummary,
   CreateRequestInput,
   ListRequestsQuery,
+  RequestEvent,
   RequestStatus,
   UpdateStatusInput,
 } from './requests.schema.js';
@@ -38,6 +42,20 @@ export function canTransition(from: RequestStatus, to: RequestStatus): boolean {
   return ALLOWED_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * Decorates a stored row with its derived attention state.
+ *
+ * Every path out of this service goes through here, so a request can never reach the
+ * API with the field missing or computed against a different clock — all rows in one
+ * response are evaluated against a single `now`.
+ */
+function decorate(
+  request: Omit<ClientRequest, 'attention'>,
+  now: number = Date.now(),
+): ClientRequest {
+  return { ...request, attention: attentionFor(request, now) };
+}
+
 export type ListResult = {
   items: ClientRequest[];
   pagination: {
@@ -50,9 +68,10 @@ export type ListResult = {
 
 export async function listRequests(query: ListRequestsQuery): Promise<ListResult> {
   const { items, total } = await repository.list(query);
+  const now = Date.now();
 
   return {
-    items,
+    items: items.map((item) => decorate(item, now)),
     pagination: {
       page: query.page,
       pageSize: query.pageSize,
@@ -62,22 +81,67 @@ export async function listRequests(query: ListRequestsQuery): Promise<ListResult
   };
 }
 
-export type RequestStats = Record<RequestStatus, number> & { total: number };
+export type RequestStats = Record<RequestStatus, number> & {
+  total: number;
+  needsAttention: number;
+  clients: ClientSummary[];
+};
+
+/** How many clients the rail lists before it stops being a navigator and starts being a report. */
+const CLIENT_LIST_LIMIT = 8;
 
 export async function getStats(): Promise<RequestStats> {
-  const counts = await repository.countsByStatus();
-  return { ...counts, total: counts.new + counts.in_progress + counts.done };
+  // Three independent aggregates, so they go out together rather than in sequence.
+  const [counts, needsAttention, clients] = await Promise.all([
+    repository.countsByStatus(),
+    repository.countNeedingAttention(),
+    repository.countsByClient(CLIENT_LIST_LIMIT),
+  ]);
+
+  return {
+    ...counts,
+    total: counts.new + counts.in_progress + counts.done,
+    needsAttention,
+    clients,
+  };
 }
 
-export async function createRequest(input: CreateRequestInput): Promise<ClientRequest> {
+/**
+ * The trail for one request.
+ *
+ * A separate call rather than an `events` field on the row: the list endpoint returns
+ * fifty requests at a time and nobody reads fifty timelines, so folding them in would
+ * mean fetching hundreds of rows to render none of them.
+ */
+export async function getActivity(id: string): Promise<RequestEvent[]> {
+  const request = await repository.findById(id);
+
+  if (!request) {
+    throw ApiError.notFound(`No client request with id ${id}.`);
+  }
+
+  return repository.listEvents(id);
+}
+
+export async function createRequest(
+  input: CreateRequestInput,
+  actor: string,
+): Promise<ClientRequest> {
   // Every request starts at `new`; the client does not get to choose a starting
   // status, or it could skip straight to done and bypass the machine entirely.
-  return repository.create(input);
+  const created = decorate(await repository.create(input, actor));
+
+  // Announced after the write has committed, never before — a listener that reacted
+  // to an event for a row that then failed to save would be showing a lie.
+  publish({ type: 'request.created', data: created });
+
+  return created;
 }
 
 export async function updateRequestStatus(
   id: string,
   input: UpdateStatusInput,
+  actor: string,
 ): Promise<ClientRequest> {
   const current = await repository.findById(id);
 
@@ -101,7 +165,7 @@ export async function updateRequestStatus(
   if (current.version !== input.expectedVersion) {
     throw ApiError.versionConflict(
       'This request was changed by someone else while you were looking at it.',
-      { current },
+      { current: decorate(current) },
     );
   }
 
@@ -119,18 +183,25 @@ export async function updateRequestStatus(
     id,
     input.status,
     input.expectedVersion,
+    actor,
+    current.status,
   );
 
-  if (!updated) {
-    // The row existed a moment ago and the transition was legal, so a null here
-    // means the version moved underneath us — someone else updated it first.
-    const latest = await repository.findById(id);
-
-    throw ApiError.versionConflict(
-      'This request was changed by someone else while you were looking at it.',
-      { current: latest },
-    );
+  if (updated) {
+    const decorated = decorate(updated);
+    publish({ type: 'request.updated', data: decorated });
+    return decorated;
   }
 
-  return updated;
+  /**
+   * The row existed a moment ago, the version matched, and the transition was legal —
+   * so reaching here means another writer landed in the gap between that read and
+   * this write. Rare, but the compare-and-set is what makes it safe rather than silent.
+   */
+  const latest = await repository.findById(id);
+
+  throw ApiError.versionConflict(
+    'This request was changed by someone else while you were looking at it.',
+    { current: latest ? decorate(latest) : null },
+  );
 }
