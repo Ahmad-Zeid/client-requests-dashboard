@@ -9,13 +9,19 @@ import { useToast } from '../../components/ToastProvider';
 import { ApiClientError, apiRequest } from '../../lib/apiClient';
 import type {
   ClientRequest,
+  ClientSummary,
   PaginatedRequests,
+  RequestEvent,
   RequestPriority,
   RequestStatus,
 } from '../../types/request';
 
 export type RequestFilters = {
   status: RequestStatus | 'all';
+  /** Narrow to requests the server's attention rules have flagged. */
+  attention: boolean;
+  /** Exact client name, or null for every client. */
+  client: string | null;
   q: string;
   page: number;
   pageSize: number;
@@ -33,6 +39,8 @@ export const requestKeys = {
 function buildQueryString(filters: RequestFilters): string {
   const params = new URLSearchParams();
   if (filters.status !== 'all') params.set('status', filters.status);
+  if (filters.attention) params.set('attention', 'true');
+  if (filters.client) params.set('client', filters.client);
   if (filters.q.trim()) params.set('q', filters.q.trim());
   params.set('page', String(filters.page));
   params.set('pageSize', String(filters.pageSize));
@@ -52,12 +60,12 @@ export function useRequestsQuery(filters: RequestFilters) {
     placeholderData: keepPreviousData,
 
     /**
-     * Ten seconds. Long enough that switching filters back and forth does not
-     * re-hit the API, short enough that a tab left open and returned to shows
-     * current data. React Query also refetches on window focus by default, which
-     * is what covers the "someone else changed it while I was away" case.
+     * Thirty seconds, up from ten. Freshness is now the stream's job — the server
+     * pushes every change — so refetching aggressively would mostly re-fetch data
+     * the client already has. The window-focus refetch stays as the backstop for
+     * the case the stream was down while the tab was hidden.
      */
-    staleTime: 10_000,
+    staleTime: 30_000,
 
     retry: (failureCount, error) => {
       // Retrying a 401 or a 422 just repeats a rejection the server already
@@ -68,7 +76,11 @@ export function useRequestsQuery(filters: RequestFilters) {
   });
 }
 
-export type RequestStats = Record<RequestStatus, number> & { total: number };
+export type RequestStats = Record<RequestStatus, number> & {
+  total: number;
+  needsAttention: number;
+  clients: ClientSummary[];
+};
 
 /**
  * Counts for the rail. Its own query rather than derived from the list, because
@@ -81,6 +93,28 @@ export function useRequestStats() {
     queryFn: ({ signal }) => apiRequest<{ data: RequestStats }>('/requests/stats', { signal }),
     select: (response) => response.data,
     staleTime: 10_000,
+  });
+}
+
+/**
+ * The trail for whichever request is selected.
+ *
+ * Deliberately a *second* query rather than part of the list payload. The row itself
+ * is already in the cache, so the detail pane renders the moment you press `j` — the
+ * trail then fills in underneath it. Folding the history into the list response would
+ * have made every keystroke wait on data that is only ever read one request at a time.
+ *
+ * `enabled` keeps it from firing with a null id; TanStack Query caches per id, so
+ * walking back up the list re-shows a trail already fetched without a round trip.
+ */
+export function useRequestActivity(id: string | null) {
+  return useQuery({
+    queryKey: [...requestKeys.all, 'activity', id] as const,
+    queryFn: ({ signal }) =>
+      apiRequest<{ data: RequestEvent[] }>(`/requests/${id}/activity`, { signal }),
+    select: (response) => response.data,
+    enabled: id !== null,
+    staleTime: 30_000,
   });
 }
 
