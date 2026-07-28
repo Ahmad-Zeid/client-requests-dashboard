@@ -9,7 +9,10 @@ import { logger } from './lib/logger.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { requestId } from './middleware/requestId.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { demoRouter } from './modules/demo/demo.routes.js';
+import { eventsRouter } from './modules/events/events.routes.js';
 import { requestsRouter } from './modules/requests/requests.routes.js';
+import { subscriberCount } from './lib/eventBus.js';
 
 /**
  * Builds the Express app without starting a server.
@@ -62,11 +65,20 @@ export function createApp(): Express {
       status: database ? 'ok' : 'degraded',
       uptimeSeconds: Math.round(process.uptime()),
       checks: { database: database ? 'ok' : 'unreachable' },
+      // Lets the client discover whether the demo controls should be offered at all,
+      // instead of shipping a build that guesses which environment it is in.
+      features: { demoMode: env.DEMO_MODE },
+      streamClients: subscriberCount(),
     });
   });
 
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/requests', requestsRouter);
+  app.use('/api/v1/events', eventsRouter);
+
+  if (env.DEMO_MODE) {
+    app.use('/api/v1/demo', demoRouter);
+  }
 
   app.use(notFound);
   app.use(errorHandler);

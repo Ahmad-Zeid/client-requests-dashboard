@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { closePool, pingDatabase } from './db/pool.js';
+import { closeAllStreams } from './lib/eventBus.js';
 import { logger } from './lib/logger.js';
 
 async function main(): Promise<void> {
@@ -33,6 +34,10 @@ async function main(): Promise<void> {
     shuttingDown = true;
 
     logger.info({ signal }, 'Shutting down');
+
+    // Every SSE stream is an open connection, and `server.close()` waits for all of
+    // them. Without this the process hangs until the force-exit timer fires.
+    closeAllStreams();
 
     const force = setTimeout(() => {
       logger.error('Shutdown timed out after 10s — forcing exit');
