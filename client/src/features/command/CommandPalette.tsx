@@ -83,6 +83,22 @@ export function CommandPalette({ open, onClose, commands }: CommandPaletteProps)
   }
 
   function onKeyDown(event: React.KeyboardEvent) {
+    /**
+     * ⌘K closes as well as opens.
+     *
+     * It has to be handled here, not alongside the page's other shortcuts: those are
+     * disabled while any overlay is open, which is what stops `j` and `e` from acting
+     * on the queue behind the palette. That blanket rule would also swallow the one
+     * key that is supposed to work *because* the palette is open. The same key opening
+     * and closing is the behaviour people already have from every other tool, and a
+     * shortcut that only works one way gets remembered as broken.
+     */
+    if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
     switch (event.key) {
       /**
        * Handled here rather than left to the dialog's native `cancel` event.
