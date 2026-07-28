@@ -67,9 +67,12 @@ export function SignInPage() {
     <div className="signin">
       <div className="signin__form-col">
         <div className="signin__inner">
-          <p className="signin__brand">
-            Requests<span className="rail__mark-dot">.</span>
-          </p>
+          <div className="signin__brand">
+            <span className="rail__logo" aria-hidden="true">
+              CR
+            </span>
+            <span className="rail__mark">Requests</span>
+          </div>
 
           <h1 className="signin__title">Sign in</h1>
           <p className="signin__lede">
@@ -135,8 +138,8 @@ export function SignInPage() {
         <p className="signin__aside-heading">How a request moves</p>
 
         <ol className="signin__flow">
-          <li className="signin__flow-item" data-current="true">
-            <span className="signin__flow-marker">1</span>
+          <li className="signin__flow-item">
+            <span className="status__dot" data-signin-dot="new" />
             <div>
               <p className="signin__flow-title">New</p>
               <p className="signin__flow-body">
@@ -145,14 +148,18 @@ export function SignInPage() {
             </div>
           </li>
           <li className="signin__flow-item">
-            <span className="signin__flow-marker">2</span>
+            <span className="status" data-status="in_progress">
+              <span className="status__dot" aria-hidden="true" />
+            </span>
             <div>
               <p className="signin__flow-title">In progress</p>
               <p className="signin__flow-body">Someone has started. The queue shows it as taken.</p>
             </div>
           </li>
           <li className="signin__flow-item">
-            <span className="signin__flow-marker">3</span>
+            <span className="status" data-status="done">
+              <span className="status__dot" aria-hidden="true" />
+            </span>
             <div>
               <p className="signin__flow-title">Done</p>
               <p className="signin__flow-body">

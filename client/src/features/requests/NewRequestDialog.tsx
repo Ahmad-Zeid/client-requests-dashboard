@@ -105,7 +105,7 @@ export function NewRequestDialog({ open, onClose }: NewRequestDialogProps) {
           </div>
           <button
             type="button"
-            className="dialog__close"
+            className="icon-btn"
             onClick={onClose}
             aria-label="Close without saving"
           >

@@ -13,7 +13,7 @@ type StatusControlProps = {
  *
  * The label names the destination — "Start work", "Mark done" — rather than a
  * generic "Next", so the outcome is legible before the click. At the terminal
- * state the button is gone and replaced by plain text: a disabled control with no
+ * state there is no button at all: a permanently disabled control with no
  * explanation just invites people to keep clicking it.
  */
 export function StatusControl({ request, isPending, onAdvance }: StatusControlProps) {
@@ -22,8 +22,7 @@ export function StatusControl({ request, isPending, onAdvance }: StatusControlPr
 
   if (!next || !label) {
     return (
-      <span className="pagination__summary" style={{ display: 'inline-flex', gap: 6 }}>
-        <Icon name="check" size={14} />
+      <span className="priority" data-priority="low">
         Closed
       </span>
     );
@@ -32,11 +31,15 @@ export function StatusControl({ request, isPending, onAdvance }: StatusControlPr
   return (
     <Button
       size="sm"
-      variant={request.status === 'new' ? 'secondary' : 'primary'}
+      variant="secondary"
       state={isPending ? 'loading' : 'idle'}
       loadingLabel={label}
-      leading={<Icon name={request.status === 'new' ? 'arrowRight' : 'tick'} size={14} />}
-      onClick={() => onAdvance(request)}
+      leading={<Icon name={request.status === 'new' ? 'arrowRight' : 'tick'} size={13} />}
+      onClick={(event) => {
+        // The row itself is clickable for selection; the action must not also select.
+        event.stopPropagation();
+        onAdvance(request);
+      }}
     >
       {label}
     </Button>
