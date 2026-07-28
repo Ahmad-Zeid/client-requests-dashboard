@@ -18,6 +18,15 @@ const envSchema = z.object({
   AUTH_SECRET: z.string().min(8, 'AUTH_SECRET must be at least 8 characters'),
   DEMO_USER_EMAIL: z.string().email().default('ops@example.com'),
   DEMO_USER_PASSWORD: z.string().min(6).default('demo1234'),
+
+  /**
+   * Enables the destructive demo-reset endpoint. Off unless a deployment explicitly
+   * opts in, so the route simply does not exist in a normal environment.
+   */
+  DEMO_MODE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);
