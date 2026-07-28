@@ -47,7 +47,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   // Each test starts from a known-empty table so assertions on counts are stable.
-  await pool.query('truncate table client_requests');
+  await pool.query('truncate table client_requests cascade');
 });
 
 afterAll(async () => {
@@ -239,6 +239,234 @@ describe('listing', () => {
 
     expect(response.body.data).toHaveLength(1);
     expect(response.body.data[0].id).toBe(a.id);
+  });
+});
+
+describe('activity trail', () => {
+  it('records creation, attributed to the session that made it', async () => {
+    const created = await createRequestRow();
+
+    const response = await request(app)
+      .get(`/api/v1/requests/${created.id}/activity`)
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0]).toMatchObject({
+      type: 'created',
+      fromStatus: null,
+      toStatus: 'new',
+      version: 1,
+      // Taken from the verified token, never from the request body — an actor a
+      // client can name is an actor a client can forge.
+      actor: env.DEMO_USER_EMAIL,
+    });
+  });
+
+  it('appends one entry per status change, in order, with the resulting version', async () => {
+    const created = await createRequestRow();
+
+    await request(app)
+      .patch(`/api/v1/requests/${created.id}/status`)
+      .set('authorization', `Bearer ${token}`)
+      .send({ status: 'in_progress', expectedVersion: 1 })
+      .expect(200);
+
+    await request(app)
+      .patch(`/api/v1/requests/${created.id}/status`)
+      .set('authorization', `Bearer ${token}`)
+      .send({ status: 'done', expectedVersion: 2 })
+      .expect(200);
+
+    const response = await request(app)
+      .get(`/api/v1/requests/${created.id}/activity`)
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(
+      response.body.data.map((event: { fromStatus: string; toStatus: string; version: number }) => [
+        event.fromStatus,
+        event.toStatus,
+        event.version,
+      ]),
+    ).toEqual([
+      [null, 'new', 1],
+      ['new', 'in_progress', 2],
+      ['in_progress', 'done', 3],
+    ]);
+  });
+
+  /**
+   * The row write and its event are one statement, so a rejected write cannot leave
+   * history behind. Without that guarantee the trail would eventually record changes
+   * that never happened — which is worse than having no trail, because it looks
+   * authoritative.
+   */
+  it('writes nothing when the compare-and-set loses', async () => {
+    const created = await createRequestRow();
+
+    await request(app)
+      .patch(`/api/v1/requests/${created.id}/status`)
+      .set('authorization', `Bearer ${token}`)
+      .send({ status: 'in_progress', expectedVersion: 1 })
+      .expect(200);
+
+    // Same version again: this caller is working from a state that has moved on.
+    await request(app)
+      .patch(`/api/v1/requests/${created.id}/status`)
+      .set('authorization', `Bearer ${token}`)
+      .send({ status: 'in_progress', expectedVersion: 1 })
+      .expect(409);
+
+    const response = await request(app)
+      .get(`/api/v1/requests/${created.id}/activity`)
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.data).toHaveLength(2);
+  });
+
+  it('404s for a request that does not exist', async () => {
+    await request(app)
+      .get('/api/v1/requests/00000000-0000-4000-8000-000000000000/activity')
+      .set('authorization', `Bearer ${token}`)
+      .expect(404);
+  });
+});
+
+describe('client scoping', () => {
+  it('narrows the list to one client and counts open work per client', async () => {
+    const finished = await createRequestRow({ clientName: 'Olive & Thyme', title: 'Closed one' });
+    await createRequestRow({ clientName: 'Olive & Thyme', title: 'Open one' });
+    await createRequestRow({ clientName: 'Rawi Books', title: 'Someone else' });
+
+    for (const [status, version] of [['in_progress', 1], ['done', 2]] as const) {
+      await request(app)
+        .patch(`/api/v1/requests/${finished.id}/status`)
+        .set('authorization', `Bearer ${token}`)
+        .send({ status, expectedVersion: version })
+        .expect(200);
+    }
+
+    const list = await request(app)
+      .get('/api/v1/requests?client=Olive%20%26%20Thyme')
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(list.body.data).toHaveLength(2);
+    expect(list.body.pagination.total).toBe(2);
+
+    const stats = await request(app)
+      .get('/api/v1/requests/stats')
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // Counted as *open* work, not total — a client with nothing outstanding needs
+    // nothing from you, and the rail is a queue navigator rather than a report.
+    expect(stats.body.data.clients).toContainEqual({ name: 'Olive & Thyme', open: 1, total: 2 });
+    expect(stats.body.data.clients).toContainEqual({ name: 'Rawi Books', open: 1, total: 1 });
+  });
+});
+
+describe('stream tickets', () => {
+  it('refuses to issue a ticket without a session', async () => {
+    await request(app).post('/api/v1/events/ticket').expect(401);
+  });
+
+  it('issues a ticket that opens the stream exactly once', async () => {
+    const issued = await request(app)
+      .post('/api/v1/events/ticket')
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const { ticket } = issued.body.data;
+    expect(typeof ticket).toBe('string');
+
+    // Supertest holds the connection open for a streaming response, so the first
+    // redemption is checked by its headers and then abandoned.
+    const stream = request(app).get(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`);
+    await new Promise<void>((resolve, reject) => {
+      stream
+        .buffer(false)
+        .parse((res, callback) => {
+          expect(res.headers['content-type']).toContain('text/event-stream');
+          res.destroy();
+          callback(null, null);
+          resolve();
+        })
+        .end((error) => {
+          if (error && !/socket hang up|aborted|ECONNRESET/.test(error.message)) reject(error);
+        });
+    });
+
+    // The whole point of a ticket over a token in the query string: a leaked one is
+    // worth nothing, because it has already been spent.
+    await request(app).get(`/api/v1/events?ticket=${encodeURIComponent(ticket)}`).expect(401);
+  });
+
+  it('rejects a ticket it never issued', async () => {
+    await request(app).get('/api/v1/events?ticket=forged').expect(401);
+  });
+});
+
+describe('attention rules', () => {
+  /**
+   * The rules are a function of the clock, so the only honest way to test them is to
+   * write rows with known ages. Inserted directly rather than through the API: the
+   * API refuses to let a caller choose when a request arrived, which is correct, and
+   * is exactly why the fixture has to go around it.
+   */
+  async function seedAged(
+    title: string,
+    status: 'new' | 'in_progress',
+    priority: 'low' | 'medium' | 'high',
+    ageHours: number,
+    touchedHoursAgo = ageHours,
+  ) {
+    await pool.query(
+      `insert into client_requests (client_name, title, priority, status, created_at, updated_at)
+       values ('Fixture', $1, $2, $3, now() - ($4 * interval '1 hour'), now() - ($5 * interval '1 hour'))`,
+      [title, priority, status, ageHours, touchedHoursAgo],
+    );
+  }
+
+  it('flags each kind of neglect, and leaves healthy requests alone', async () => {
+    await seedAged('Unacknowledged high', 'new', 'high', 30);
+    await seedAged('Waiting far too long', 'new', 'medium', 100);
+    await seedAged('Started then forgotten', 'in_progress', 'medium', 300, 140);
+
+    // Controls, one just inside each threshold.
+    await seedAged('Fresh high', 'new', 'high', 2);
+    await seedAged('Recently worked', 'in_progress', 'medium', 300, 4);
+
+    const response = await request(app)
+      .get('/api/v1/requests?attention=true')
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.body.data.map((row: ClientRequest) => row.title).sort()).toEqual([
+      'Started then forgotten',
+      'Unacknowledged high',
+      'Waiting far too long',
+    ]);
+
+    expect(
+      response.body.data.map((row: ClientRequest) => row.attention?.reason).sort(),
+    ).toEqual(['stalled', 'unacknowledged_high', 'waiting_too_long']);
+
+    // The filter and the count are two different implementations of one rule — the
+    // JavaScript predicate and the SQL fragment — so they are worth comparing.
+    const stats = await request(app)
+      .get('/api/v1/requests/stats')
+      .set('authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(stats.body.data.needsAttention).toBe(3);
+  });
+
+  it('reports no attention on a request that has just arrived', async () => {
+    const created = await createRequestRow();
+    expect(created.attention).toBeNull();
   });
 });
 
