@@ -33,7 +33,10 @@ export type IconName =
   | 'layers'
   | 'list'
   | 'cornerDownLeft'
-  | 'arrowUpDown';
+  | 'arrowUpDown'
+  | 'users'
+  | 'activity'
+  | 'refresh';
 
 const PATHS: Record<IconName, React.ReactNode> = {
   inbox: (
@@ -99,6 +102,21 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   list: <path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12M3.6 6.5h.01M3.6 12h.01M3.6 17.5h.01" />,
   cornerDownLeft: <path d="M19 5.5v6.2a2.3 2.3 0 0 1-2.3 2.3H6m0 0 4-4m-4 4 4 4" />,
+  users: (
+    <>
+      <circle cx="9" cy="8.5" r="3.4" />
+      <path d="M3.2 19.4a6 6 0 0 1 11.6 0" />
+      <path d="M16.2 5.6a3.4 3.4 0 0 1 0 5.9" />
+      <path d="M17.6 14.4a6 6 0 0 1 3.2 5" />
+    </>
+  ),
+  activity: <path d="M3 12.2h3.6l2.6-7 3.4 13.6 2.7-6.6h5.7" />,
+  refresh: (
+    <>
+      <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+      <path d="M20.4 4.2v4.6h-4.6" />
+    </>
+  ),
   arrowUpDown: <path d="M8 4.5v15m0-15-3 3m3-3 3 3M16 19.5v-15m0 15 3-3m-3 3-3-3" />,
 };
 

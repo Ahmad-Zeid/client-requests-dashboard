@@ -13,6 +13,13 @@ export type RequestStatus = (typeof REQUEST_STATUSES)[number];
 export const REQUEST_PRIORITIES = ['low', 'medium', 'high'] as const;
 export type RequestPriority = (typeof REQUEST_PRIORITIES)[number];
 
+/** Why a request is flagged. Derived on the server; never stored. */
+export type RequestAttention = {
+  reason: 'unacknowledged_high' | 'waiting_too_long' | 'stalled';
+  label: string;
+  hours: number;
+};
+
 export type ClientRequest = {
   id: string;
   clientName: string;
@@ -24,6 +31,27 @@ export type ClientRequest = {
   version: number;
   createdAt: string;
   updatedAt: string;
+  attention: RequestAttention | null;
+};
+
+/**
+ * One entry in a request's trail. Stored server-side, unlike `attention` — this is a
+ * record of something that happened, so it does not change when the clock does.
+ */
+export type RequestEvent = {
+  id: string;
+  type: 'created' | 'status_changed';
+  fromStatus: RequestStatus | null;
+  toStatus: RequestStatus;
+  actor: string;
+  version: number;
+  createdAt: string;
+};
+
+export type ClientSummary = {
+  name: string;
+  open: number;
+  total: number;
 };
 
 export type Pagination = {

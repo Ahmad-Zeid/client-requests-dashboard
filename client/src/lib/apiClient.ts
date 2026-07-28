@@ -1,12 +1,14 @@
 import type { ClientRequest } from '../types/request';
 
-const BASE_URL = '/api/v1';
+/**
+ * Relative by default, so local development goes through the Vite proxy and needs no
+ * env file at all. A deployment where the API lives on another origin sets
+ * `VITE_API_BASE_URL` at build time.
+ */
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+
 const TOKEN_STORAGE_KEY = 'client-requests.token';
 
-/**
- * Every non-2xx response becomes one of these, so callers branch on a stable
- * `code` rather than parsing messages or checking status numbers in three places.
- */
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;
@@ -34,24 +36,73 @@ export const tokenStorage = {
   clear: () => localStorage.removeItem(TOKEN_STORAGE_KEY),
 };
 
+/* ── Request log ──────────────────────────────────────────────────────────── */
+
+export type LoggedCall = {
+  id: number;
+  method: string;
+  path: string;
+  status: number;
+  durationMs: number;
+  /** The server's request id, echoed back in the `x-request-id` header. */
+  requestId: string | null;
+  at: number;
+};
+
+type LogListener = (calls: LoggedCall[]) => void;
+
+const MAX_LOGGED = 40;
+let log: LoggedCall[] = [];
+let nextLogId = 0;
+const listeners = new Set<LogListener>();
+
+/**
+ * Every call the app makes, kept in a small ring buffer.
+ *
+ * This exists so the data flow is *watchable* rather than described — you can open
+ * the panel, click something, and see the PATCH, its status, its duration and the
+ * request id that ties it to a server log line. It is the same information the
+ * network tab holds, surfaced where someone evaluating the app will actually look.
+ */
+export function subscribeToRequestLog(listener: LogListener): () => void {
+  listeners.add(listener);
+  listener(log);
+  return () => listeners.delete(listener);
+}
+
+export function clearRequestLog(): void {
+  log = [];
+  listeners.forEach((listener) => listener(log));
+}
+
+function record(entry: Omit<LoggedCall, 'id' | 'at'>): void {
+  log = [{ ...entry, id: nextLogId++, at: Date.now() }, ...log].slice(0, MAX_LOGGED);
+  listeners.forEach((listener) => listener(log));
+}
+
+/* ── The client ───────────────────────────────────────────────────────────── */
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** Skips the request log — used by polling or background calls that would flood it. */
+  silent?: boolean;
 };
 
 /**
  * One place where HTTP happens.
  *
- * Attaches the bearer token, normalises errors, and drops the session when the
- * server says the token is no longer good. Components never call `fetch`, so
- * there is exactly one file to change to add retries, tracing, or a base URL.
+ * Attaches the bearer token, normalises errors, drops the session when the server
+ * says the token is no longer good, and records the call. Components never call
+ * `fetch`, so there is exactly one file to change to add retries or tracing.
  */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options;
+  const { method = 'GET', body, signal, silent = false } = options;
   const token = tokenStorage.get();
+  const startedAt = performance.now();
 
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     signal,
     headers: {
@@ -60,6 +111,16 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+
+  if (!silent) {
+    record({
+      method,
+      path,
+      status: response.status,
+      durationMs: Math.round(performance.now() - startedAt),
+      requestId: response.headers.get('x-request-id'),
+    });
+  }
 
   if (response.ok) {
     return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
