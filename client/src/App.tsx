@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/ToastProvider';
+import { ThemeProvider } from './features/theme/ThemeProvider';
 import { AuthProvider } from './features/auth/AuthContext';
 import { ProtectedRoute } from './features/auth/ProtectedRoute';
 import { SignInPage } from './features/auth/SignInPage';
@@ -34,26 +35,28 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <ToastProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/sign-in" element={<SignInPage />} />
-                <Route
-                  path="/requests"
-                  element={
-                    <ProtectedRoute>
-                      <RequestsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="*" element={<Navigate to="/requests" replace />} />
-              </Routes>
-            </BrowserRouter>
-          </ToastProvider>
-        </AuthProvider>
-      </QueryClientProvider>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <ToastProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/sign-in" element={<SignInPage />} />
+                  <Route
+                    path="/requests"
+                    element={
+                      <ProtectedRoute>
+                        <RequestsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route path="*" element={<Navigate to="/requests" replace />} />
+                </Routes>
+              </BrowserRouter>
+            </ToastProvider>
+          </AuthProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

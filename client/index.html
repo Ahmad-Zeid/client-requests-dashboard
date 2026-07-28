@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="dark light" />
     <title>Client Requests</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -12,6 +12,32 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+
+    <script>
+      /**
+       * Runs before first paint, on purpose.
+       *
+       * React cannot set the theme early enough — by the time it hydrates, the
+       * browser has already painted, and a dark-mode user sees a white flash on
+       * every single load. That flash is the most obvious "unfinished" tell an
+       * otherwise-polished themed app can have, so this one tiny blocking script
+       * earns its place in the critical path.
+       *
+       * Wrapped in try/catch because localStorage throws in Safari private mode,
+       * and a theme preference is never worth a blank page.
+       */
+      (function () {
+        try {
+          var stored = localStorage.getItem('client-requests.theme');
+          if (stored !== 'dark' && stored !== 'light') {
+            stored = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.dataset.theme = stored;
+        } catch (_) {
+          document.documentElement.dataset.theme = 'dark';
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
