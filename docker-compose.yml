@@ -1,0 +1,30 @@
+# Postgres for anyone who would rather not install it locally.
+#
+#   docker compose up -d
+#
+# Exposed on 5433 so it cannot collide with a Postgres already running on the
+# default 5432. The matching connection string is the default in server/.env.example.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: client-requests-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: client_requests
+    ports:
+      - '5433:5432'
+    volumes:
+      - client-requests-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # `npm run db:migrate` immediately after `up` would otherwise race the
+      # container's own first-boot initialisation.
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d client_requests']
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  client-requests-pgdata:
