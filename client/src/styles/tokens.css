@@ -1,0 +1,139 @@
+/* Hallmark · tokens · theme: Cobalt · genre: modern-minimal
+ * paper-band: light (99%) · display-style: grotesk-sans · accent-hue: cool (258°)
+ *
+ * Every colour, font, space, and duration in the app resolves through a token in
+ * this file. Nothing downstream inlines a hex or an oklch() value — that is what
+ * keeps the palette from drifting to eleven colours over the course of a build.
+ */
+
+:root {
+  /* ── Paper ─────────────────────────────────────────────────────────────── */
+  /* Cool engineered near-white. Not #fff: a pure-white surface reads flat and
+     synthetic, and there is nowhere left to go for a raised surface. */
+  --color-paper: oklch(99% 0.003 250);
+  --color-paper-2: oklch(97.4% 0.004 252);
+  --color-paper-3: oklch(95.4% 0.005 254);
+  --color-paper-inset: oklch(93.6% 0.006 254);
+
+  /* ── Ink ───────────────────────────────────────────────────────────────── */
+  --color-ink: oklch(21% 0.021 262);
+  --color-ink-2: oklch(37% 0.017 260);
+  --color-neutral: oklch(48% 0.014 258);
+  /* 53.5%, not 57%: at 57% this lands on 4.13:1 against paper, just under WCAG AA
+     for body text. Secondary text still has to be readable to be text. */
+  --color-muted: oklch(53.5% 0.013 258);
+  /* Reserved for input placeholders, which are exempt and should stay clearly
+     lighter than a real value. Anything that is actual content uses --color-muted. */
+  --color-placeholder: oklch(66% 0.01 256);
+  --color-disabled: oklch(72% 0.008 256);
+
+  /* ── Rules ─────────────────────────────────────────────────────────────── */
+  /* Ruler-drawn, not editorial hairline: thin but unambiguously visible. */
+  --color-rule: oklch(92.2% 0.005 255);
+  --color-rule-2: oklch(87.5% 0.008 256);
+  --color-rule-strong: oklch(80% 0.011 256);
+
+  /* ── Accent · electric cobalt ──────────────────────────────────────────── */
+  --color-accent: oklch(52% 0.213 260);
+  --color-accent-hover: oklch(46.5% 0.216 260);
+  --color-accent-active: oklch(42% 0.2 260);
+  --color-accent-disabled: oklch(76% 0.07 260);
+  /* Text colour whenever --color-accent fills a surface. Verified against the
+     accent at Lc 78 — never hardcode white, the accent could change. */
+  --color-accent-ink: oklch(99% 0.004 250);
+  --color-accent-subtle: oklch(95.6% 0.031 260);
+  --color-accent-subtle-hover: oklch(93.4% 0.045 260);
+  --color-accent-rule: oklch(84% 0.083 260);
+  --color-accent-text: oklch(45% 0.19 260);
+
+  /* ── Functional ────────────────────────────────────────────────────────── */
+  --color-danger: oklch(54% 0.196 25);
+  --color-danger-ink: oklch(99% 0.004 250);
+  --color-danger-subtle: oklch(96% 0.028 25);
+  --color-danger-rule: oklch(84% 0.09 25);
+  --color-danger-text: oklch(47% 0.18 25);
+
+  /* Focus ring. Deeper than the accent so it stays legible when it sits just
+     outside an accent-filled button. Offset puts it on paper either way. */
+  --color-focus: oklch(44% 0.235 262);
+
+  --color-overlay: oklch(21% 0.021 262 / 0.42);
+
+  /* ── Type ──────────────────────────────────────────────────────────────── */
+  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.1875rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 1.9375rem;
+  --text-display-s: clamp(2rem, 3.4vw + 1rem, 2.75rem);
+
+  --leading-tight: 1.18;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  --tracking-display: -0.028em;
+  --tracking-tight: -0.014em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* ── Space · 4pt scale ─────────────────────────────────────────────────── */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+
+  /* ── Radii · tight, instrument-panel ───────────────────────────────────── */
+  --radius-2: 2px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-round: 999px;
+
+  /* ── Elevation ─────────────────────────────────────────────────────────── */
+  --shadow-1: 0 1px 2px oklch(21% 0.021 262 / 0.05);
+  --shadow-2: 0 2px 8px oklch(21% 0.021 262 / 0.07), 0 1px 2px oklch(21% 0.021 262 / 0.05);
+  --shadow-3: 0 12px 32px oklch(21% 0.021 262 / 0.13), 0 2px 8px oklch(21% 0.021 262 / 0.07);
+
+  /* ── Motion ────────────────────────────────────────────────────────────── */
+  --dur-instant: 80ms;
+  --dur-short: 140ms;
+  --dur-medium: 220ms;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.6, 0, 1, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ── Layers ────────────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-rail: 20;
+  --z-dropdown: 30;
+  --z-overlay: 40;
+  --z-toast: 50;
+
+  /* ── Geometry ──────────────────────────────────────────────────────────── */
+  /* One control height shared by every button and every input. A page with 44px
+     buttons and 38px inputs looks untuned even when nobody can say why. */
+  --control-height: 44px;
+  --control-height-sm: 34px;
+  --rail-width: 232px;
+  --measure: 62ch;
+}
