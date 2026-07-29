@@ -7,6 +7,24 @@ the front, Express + Postgres behind it, with changes pushed live over SSE.
 Keyboard-first, dark by default, with a light theme that follows your OS until you
 choose otherwise.
 
+### ▶ [Try it live](https://client-requests-dashboard-server.vercel.app)
+
+Sign in with **`ops@example.com`** / **`demo1234`**.
+
+Worth thirty seconds if you have them:
+
+1. Press <kbd>J</kbd> and <kbd>K</kbd> — the detail pane follows with no round trip.
+2. Press <kbd>⌘K</kbd> and run **Simulate a colleague updating this request**. A second
+   session really does write to the API; the change arrives back over a live stream.
+3. Press <kbd>⌘K</kbd> again and run **Simulate a stale conflict**, then press <kbd>E</kbd>.
+   That is a genuine 409 from a real version mismatch, not a mocked one.
+4. Press <kbd>G</kbd> to watch every API call the tab makes, with timings and the
+   request ids that appear in the server's logs.
+
+*The API is on a free tier that sleeps after fifteen minutes, so the very first load can
+take ~30 seconds. Anything you change is safe to break — **Reset the demo data** is in
+the palette.*
+
 ![The triage cockpit](docs/cockpit-dark.png)
 
 Three panes rather than a table. The rail is where you choose *what to look at* — by
@@ -110,9 +128,11 @@ Built and tested on Node 26; anything from Node 20 up will work.
 
 ### Deploying it
 
-Three free tiers — Neon for Postgres, Render for the API, Vercel for the client. Both
-deployments are described by files in the repo rather than by fields somebody typed into
-a dashboard once: [`render.yaml`](render.yaml) and [`vercel.json`](vercel.json).
+This is running at the link above:
+**Neon** (Postgres, Frankfurt) → **Render** (API) → **Vercel** (client), free tiers
+throughout. Both deployments are described by files in the repo rather than by fields
+somebody typed into a dashboard once: [`render.yaml`](render.yaml),
+[`vercel.json`](vercel.json), and [`client/vercel.json`](client/vercel.json).
 
 **1. Postgres — [Neon](https://neon.tech).** Create a project and copy the *pooled*
 connection string. Change `sslmode=require` to `sslmode=verify-full` in it: that is what
@@ -134,15 +154,18 @@ reads `render.yaml` and prompts for the three secrets:
 | `AUTH_SECRET` | `openssl rand -base64 32` — not the example one |
 | `CORS_ORIGIN` | the Vercel URL from step 3; put a placeholder in for now |
 
-**3. Client — [Vercel](https://vercel.com).** Import the repo and leave the root
-directory at the repo root — `vercel.json` names the workspace build, so there is no
-monorepo detection to get wrong. One environment variable:
+**3. Client — [Vercel](https://vercel.com).** Import the repo, set the Root Directory to
+`client`, and add one environment variable:
 
 ```
 VITE_API_BASE_URL=https://<your-render-service>.onrender.com/api/v1
 ```
 
-**4.** Set `CORS_ORIGIN` on Render to the Vercel URL and redeploy. Done.
+Vite bakes that in at build time, so changing it later needs a rebuild, not just a save.
+
+**4.** Set `CORS_ORIGIN` on Render to the Vercel URL — with the scheme, without a
+trailing slash — and turn **Deployment Protection** off in Vercel, or every visitor
+meets an SSO login page instead of the app.
 
 Two things worth knowing. Render's free tier sleeps after fifteen minutes idle, so the
 first request after a quiet spell takes about thirty seconds — after which the event
@@ -168,6 +191,14 @@ Why the configuration is shaped the way it is:
   front door.
 - **`npm run build` copies `src/db/migrations` into `dist`.** `tsc` does not emit `.sql`,
   so the compiled server would otherwise reach production with no migrations to run.
+- **`npm install --include=dev`, on both hosts.** They set `NODE_ENV=production` for the
+  *build* as well as the run, and npm then omits devDependencies — which silently
+  removes TypeScript and the React types. Both platforms failed on this in different
+  disguises: Render as `tsc: not found`, Vercel as several hundred `TS7026` errors from
+  a compiler that ran without types to check against.
+- **`client/vercel.json` duplicates the root one.** Vercel reads its config from the
+  configured Root Directory, not from the top of the repo, and that setting is invisible
+  from here. Two files means the build is correct either way.
 
 The whole arrangement is rehearsed locally before it is deployed — the built client on
 one origin, the compiled API on another with `NODE_ENV=production` and a CORS allowlist.
