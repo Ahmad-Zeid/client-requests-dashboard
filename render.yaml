@@ -12,8 +12,14 @@ services:
     plan: free
     region: frankfurt # closest of Render's free regions to Beirut and the EU
 
+    # `--include=dev` is required, not belt-and-braces. NODE_ENV=production below is
+    # set for the build as well as the run, and npm omits devDependencies when it sees
+    # it — which silently removes TypeScript and fails the build with `tsc: not found`.
+    # The compiler is a build-time tool, so it belongs in devDependencies; the install
+    # is what has to be told that a build is happening.
+    #
     # npm workspaces installs both packages; only the server is built and run.
-    buildCommand: npm install && npm run build --workspace server
+    buildCommand: npm install --include=dev && npm run build --workspace server
 
     # Migrations belong in a pre-deploy step, which the free tier does not offer, so
     # they run on boot instead. That is safe *here* and not in general: the runner
