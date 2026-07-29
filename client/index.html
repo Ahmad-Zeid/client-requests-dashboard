@@ -5,6 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>Client Requests</title>
+    <meta
+      name="description"
+      content="A triage cockpit for incoming client work — what came in, whose it is, where it stands, and what has gone quiet."
+    />
+
+    <!--
+      The tab icon, inlined as a data URI rather than a file.
+
+      A favicon is one request, but it is a *blocking-looking* one: browsers ask for
+      /favicon.ico on every page whether or not you ship it, and the 404 leaves a blank
+      square in the tab strip — which is the first thing anyone opening a shared link
+      sees. Inlining removes both the request and the failure mode, and the mark stays
+      in the same file as the rest of the head rather than in a binary nobody can diff.
+
+      The glyph is the arrow from the advance button: this app is one verb, applied to a
+      queue. #2867e4 is the accent token resolved to sRGB.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232867e4'/%3E%3Cpath d='M9 16h13m0 0-5-5m5 5-5 5' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+
+    <!-- Matches the app's canvas, so the mobile browser chrome does not sit as a pale
+         band above a dark interface. -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#080b10" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+
+    <!-- A pasted link in Slack or an email should say what it is. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Client Requests" />
+    <meta
+      property="og:description"
+      content="A triage cockpit for incoming client work. Keyboard-first, live-updating, with an audit trail on every change."
+    />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
