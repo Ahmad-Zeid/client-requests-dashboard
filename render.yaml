@@ -1,0 +1,55 @@
+# Render Blueprint — the API.
+#
+# Checked in so the deployment is reviewable and reproducible rather than a set of
+# fields somebody typed into a dashboard once. Render reads this when you create a
+# Blueprint from the repo; the two `sync: false` values are prompted for, because a
+# database URL and a signing secret do not belong in git.
+
+services:
+  - type: web
+    name: client-requests-api
+    runtime: node
+    plan: free
+    region: frankfurt # closest of Render's free regions to Beirut and the EU
+
+    # npm workspaces installs both packages; only the server is built and run.
+    buildCommand: npm install && npm run build --workspace server
+    startCommand: npm start --workspace server
+
+    # Migrations run once per deploy rather than on every boot. On one instance the
+    # difference is invisible; on two it is the difference between one migration and
+    # a race between replicas.
+    preDeployCommand: npm run migrate --workspace server
+
+    # A process that is up but cannot reach Postgres is not healthy. This endpoint
+    # pings the database, so Render's probe fails when the database is unreachable
+    # instead of reporting green.
+    healthCheckPath: /api/v1/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Neon's pooled connection string. Change `sslmode=require` to
+      # `sslmode=verify-full` — it is what node-postgres does today anyway, and
+      # naming it avoids a deprecation warning on every boot.
+      - key: DATABASE_URL
+        sync: false
+
+      # Generate with: openssl rand -base64 32
+      - key: AUTH_SECRET
+        sync: false
+
+      # The Vercel origin. Comma-separated if you ever need more than one.
+      - key: CORS_ORIGIN
+        sync: false
+
+      # Mounts the rate-limited reset endpoint, so a visitor who marks everything
+      # done cannot spoil the demo for the next one.
+      - key: DEMO_MODE
+        value: 'true'
+
+      - key: DEMO_USER_EMAIL
+        value: ops@example.com
+      - key: DEMO_USER_PASSWORD
+        value: demo1234

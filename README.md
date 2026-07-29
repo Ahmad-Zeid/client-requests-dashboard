@@ -110,48 +110,64 @@ Built and tested on Node 26; anything from Node 20 up will work.
 
 ### Deploying it
 
-Three free tiers, in this order — each step needs a URL from the one before it.
+Three free tiers — Neon for Postgres, Render for the API, Vercel for the client. Both
+deployments are described by files in the repo rather than by fields somebody typed into
+a dashboard once: [`render.yaml`](render.yaml) and [`vercel.json`](vercel.json).
 
-**1. Postgres — [Neon](https://neon.tech).** Create a project and copy the pooled
-connection string. Seed it once from your machine — Render's pre-deploy step below
-handles migrations from then on:
+**1. Postgres — [Neon](https://neon.tech).** Create a project and copy the *pooled*
+connection string. Change `sslmode=require` to `sslmode=verify-full` in it: that is what
+node-postgres does today regardless, and saying so avoids a deprecation warning on every
+boot. Then seed it once from your machine — Render's pre-deploy step handles migrations
+from then on.
 
 ```bash
 DATABASE_URL='<neon connection string>' npm run db:migrate
 DATABASE_URL='<neon connection string>' npm run db:seed
 ```
 
-**2. API — [Render](https://render.com).** New Web Service from the repo.
+**2. API — [Render](https://render.com).** *New → Blueprint*, point it at the repo. It
+reads `render.yaml` and prompts for the three secrets:
 
-| Setting | Value |
+| Variable | Value |
 | --- | --- |
-| Build command | `npm install && npm run build --workspace server` |
-| Pre-deploy command | `npm run migrate --workspace server` |
-| Start command | `npm start --workspace server` |
-| Health check path | `/api/v1/health` |
+| `DATABASE_URL` | the Neon string from step 1 |
+| `AUTH_SECRET` | `openssl rand -base64 32` — not the example one |
+| `CORS_ORIGIN` | the Vercel URL from step 3; put a placeholder in for now |
 
-Migrations run as a pre-deploy step rather than on boot. On one instance the difference
-is invisible; on two it is the difference between one migration and a race between
-replicas, and the runner is idempotent either way.
-
-Environment: `DATABASE_URL` (Neon), `AUTH_SECRET` (a long random string — not the
-example one), `NODE_ENV=production`, `DEMO_MODE=true`, and `CORS_ORIGIN` set to the
-Vercel URL from step 3. Leave `CORS_ORIGIN` blank on the first deploy and fill it in
-once you have that URL.
-
-**3. Client — [Vercel](https://vercel.com).** Import the repo, root directory `client`,
-framework Vite. One environment variable:
+**3. Client — [Vercel](https://vercel.com).** Import the repo and leave the root
+directory at the repo root — `vercel.json` names the workspace build, so there is no
+monorepo detection to get wrong. One environment variable:
 
 ```
 VITE_API_BASE_URL=https://<your-render-service>.onrender.com/api/v1
 ```
 
-Then set `CORS_ORIGIN` on Render to the Vercel URL and redeploy it.
+**4.** Set `CORS_ORIGIN` on Render to the Vercel URL and redeploy. Done.
 
-Render's free tier sleeps after fifteen minutes of inactivity, so the first request
-after a quiet spell takes about thirty seconds. `DEMO_MODE=true` puts *Reset the demo
-data* in the palette, so a visitor who marks everything done cannot spoil it for the
-next one.
+Two things worth knowing. Render's free tier sleeps after fifteen minutes idle, so the
+first request after a quiet spell takes about thirty seconds — after which the event
+stream reconnects on its own. And `DEMO_MODE=true` puts *Reset the demo data* in the
+palette, so the first visitor who marks everything done cannot spoil it for the next.
+
+Why the configuration is shaped the way it is:
+
+- **Migrations are a pre-deploy step, not a boot step.** On one instance the difference
+  is invisible; on two it is the difference between one migration and a race between
+  replicas. The runner is idempotent either way, which is what makes the weaker option
+  tempting and the stronger one free.
+- **The health check pings the database.** A process that is up but cannot reach Postgres
+  is not healthy, it only looks healthy to a naive probe.
+- **`vercel.json` rewrites everything to `index.html`.** `/requests` is a React Router
+  path, not a file. Without the rewrite, opening it directly — or refreshing on it — is a
+  404 from the host, and the app looks broken to anyone who does not enter through the
+  front door.
+- **`npm run build` copies `src/db/migrations` into `dist`.** `tsc` does not emit `.sql`,
+  so the compiled server would otherwise reach production with no migrations to run.
+
+The whole arrangement is rehearsed locally before it is deployed — the built client on
+one origin, the compiled API on another with `NODE_ENV=production` and a CORS allowlist.
+That is what catches the failures which only exist once the two are not the same origin:
+CORS, helmet's cross-origin headers, `EventSource` across origins, and SPA deep links.
 
 ---
 
