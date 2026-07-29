@@ -14,12 +14,19 @@ services:
 
     # npm workspaces installs both packages; only the server is built and run.
     buildCommand: npm install && npm run build --workspace server
-    startCommand: npm start --workspace server
 
-    # Migrations run once per deploy rather than on every boot. On one instance the
-    # difference is invisible; on two it is the difference between one migration and
-    # a race between replicas.
-    preDeployCommand: npm run migrate --workspace server
+    # Migrations belong in a pre-deploy step, which the free tier does not offer, so
+    # they run on boot instead. That is safe *here* and not in general: the runner
+    # records applied files and wraps each in a transaction, so re-running is a no-op,
+    # and this plan is a single instance so there is no second replica to race. On two
+    # replicas both would start migrating at once — which is exactly what a pre-deploy
+    # step exists to prevent. Moving to a paid plan means moving this line back to
+    # `preDeployCommand`, and nothing else changes.
+    #
+    # `&&` matters: the runner exits non-zero on a failed migration, so a bad schema
+    # change fails the deploy instead of booting a server against a database it does
+    # not match.
+    startCommand: npm run migrate --workspace server && npm start --workspace server
 
     # A process that is up but cannot reach Postgres is not healthy. This endpoint
     # pings the database, so Render's probe fails when the database is unreachable

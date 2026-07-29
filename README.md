@@ -117,8 +117,8 @@ a dashboard once: [`render.yaml`](render.yaml) and [`vercel.json`](vercel.json).
 **1. Postgres — [Neon](https://neon.tech).** Create a project and copy the *pooled*
 connection string. Change `sslmode=require` to `sslmode=verify-full` in it: that is what
 node-postgres does today regardless, and saying so avoids a deprecation warning on every
-boot. Then seed it once from your machine — Render's pre-deploy step handles migrations
-from then on.
+boot, plus a future major version silently downgrading the connection. Then load the
+schema and the demo data:
 
 ```bash
 DATABASE_URL='<neon connection string>' npm run db:migrate
@@ -151,10 +151,15 @@ palette, so the first visitor who marks everything done cannot spoil it for the 
 
 Why the configuration is shaped the way it is:
 
-- **Migrations are a pre-deploy step, not a boot step.** On one instance the difference
-  is invisible; on two it is the difference between one migration and a race between
-  replicas. The runner is idempotent either way, which is what makes the weaker option
-  tempting and the stronger one free.
+- **Migrations run on boot, and that is a compromise.** They belong in a pre-deploy step,
+  which Render's free tier does not offer. It is safe *here* and not in general: the
+  runner records applied files and wraps each in a transaction, so re-running is a no-op,
+  and this plan is a single instance so there is no second replica to race. On two
+  replicas both would start migrating at once, which is the thing a pre-deploy step
+  exists to prevent. Moving to a paid plan means moving one line in `render.yaml` back to
+  `preDeployCommand`. The `&&` in the start command is load-bearing: the runner exits
+  non-zero on failure, so a bad schema change fails the deploy rather than booting a
+  server against a database it does not match.
 - **The health check pings the database.** A process that is up but cannot reach Postgres
   is not healthy, it only looks healthy to a naive probe.
 - **`vercel.json` rewrites everything to `index.html`.** `/requests` is a React Router
