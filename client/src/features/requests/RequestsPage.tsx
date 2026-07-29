@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Button } from '../../components/Button';
 import { Icon } from '../../components/Icon';
@@ -25,6 +26,7 @@ import { NewRequestDialog } from './NewRequestDialog';
 import { RequestDetail, RequestDetailEmpty } from './RequestDetail';
 import { RequestList, RequestListSkeleton } from './RequestList';
 import {
+  requestKeys,
   useAdvanceStatus,
   useRequestStats,
   useRequestsQuery,
@@ -48,6 +50,7 @@ export function RequestsPage() {
   const { user, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { notify } = useToast();
+  const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLElement>(null);
 
@@ -306,8 +309,20 @@ export function RequestsPage() {
   const resetDemo = useCallback(async () => {
     try {
       await apiRequest('/demo/reset', { method: 'POST' });
+
+      /**
+       * Drop the cache rather than invalidate it.
+       *
+       * A reset truncates and reseeds, so every id the client is holding now refers to
+       * a row that no longer exists. Invalidating would refetch those ids and collect a
+       * 404 for each — most visibly the activity trail of whatever was selected, which
+       * is a red line in the network tab on the one path a reviewer is invited to click.
+       * Removing the queries outright says what actually happened: none of this is
+       * stale, all of it is gone.
+       */
       setSelectedId(null);
       suppressedIds.current.clear();
+      queryClient.removeQueries({ queryKey: requestKeys.all });
     } catch (error) {
       notify({
         tone: 'error',
@@ -315,7 +330,7 @@ export function RequestsPage() {
         message: error instanceof ApiClientError ? error.message : 'Could not reach the server.',
       });
     }
-  }, [notify]);
+  }, [notify, queryClient]);
 
   const anyOverlayOpen = paletteOpen || dialogOpen || shortcutsOpen || mobileDetailOpen;
 
